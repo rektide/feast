@@ -1,0 +1,14 @@
+#!/usr/bin/perl
+
+use FCGI;
+use LWP::UserAgent;
+
+my $fcgi= FCGI::Request();
+my $lwp= LWP::UserAgent->new( {agent=>'fcgi-proxy-pl/1.0', timeout=>300} );
+
+while($fcgi->Accept() >= 0) {
+
+	print "Content-type: text/html\r\n\r\n";
+	print $fcgi->GetEnvironment();	
+
+}

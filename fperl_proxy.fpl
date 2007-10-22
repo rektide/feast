@@ -1,0 +1,37 @@
+#!/usr/bin/perl
+
+use FCGI;
+use LWP::UserAgent;
+use HTTP::Request;
+
+my $fcgi= FCGI::Request();
+my $lwp= LWP::UserAgent->new( {agent=>'fperl-proxy/1.0', timeout=>300} );
+
+while($fcgi->Accept() >= 0) {
+
+	my %env= $fcgi->GetEnvironment();
+	my @allow= split ',', $env{FPERL_PROXY_ALLOW};
+	my %cgi= split /[&=]/, $env{QUERY_STRING};
+	my $target= delete $cgi{proxy};
+
+	# check allowed site list
+	my $domain= $taget;
+	$domain=~ s#^(?:http://)?([^/]*)(?:/.*)?#%0#;
+	grep /$domain/, @allow
+	if (scalar @domain} == 0){
+		print "HTTP-Response-Code: 401";
+		$fcgi->Finish();
+		continue;
+	}
+
+	my $http_request = HTTP::Request->new(GET => $target);
+  	$http_request->header('Accept' => 'text/xml,application/xml,application/xhtml+xml,text/html,text/plain,text/json');
+	$http_request->header('Accept-Charset' => $env{HTTP_ACCEPT_CHARSET}) if ($env{HTTP_ACCEPT_CHARSET});
+	$http_request->header('Cookie' => $env{HTTP_COOKIE}) if ($env{HTTP_COOKIE});
+	$http_request->header('Authorization' => $env{HTTP_AUTHORIZATION}) if ($env{HTTP_AUTHORIZATION});
+
+	my $http_request = $lwp->request($http_request);
+	print $http_response->content();
+	$fcgi->Finish();
+
+	}
