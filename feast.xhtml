@@ -1,0 +1,460 @@
+<?xml version="1.0" standalone="no" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd" [<!ENTITY nbsp "&#160;"><!ENTITY middot "&#183;">] >
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" >
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+	<title>feast  : : : del.icio.us tastes from all over</title>
+	<meta name="author" content="Matthew E Fowle, rektide" />
+	<meta name="description" content="unoptimized network/link browser for del.icio.us" />
+	
+	<style type="text/css">
+		div.structural   { margin: 3px 3px; padding: 6px 30px; background-color: #90C0FF; float: left; overflow-y: auto; }
+		input { font-family: serif; font-weight: bold; font-size: 0.92em; border: 0; background-color: #90C0FF; color: #182090; }
+		p     { font-family: serif; font-weight: bold; font-size: 0.92em; margin: 0px; }
+		a     { text-decoration: none; color: #182090; }
+
+		.listing { font-family: sans-serif; font-size: 0.72em; }
+		.small { font-size: 0.85em; }
+		.big { font-size: 1em; }
+		.wide { letter-spacing: 0.8ex; }
+		.smaller { font-size: .65em; }
+
+	</style>
+
+	<!-- this page is xhtml which does not include the document.write() used in the Google AJAX api's, so include a document.write implementation -->
+	<script src="doc.write.js" type="text/javascript" ></script>
+	<script src="http://www.google.com/jsapi?key=ABQIAAAArVHWWrXR3SxTugxmgloxKhRi9OSkPaJ_dbUotrIJnQGUBPggNhQfvG1mRDeeTaJ6tguzAXUM-5-3yA" type="text/javascript"></script>
+	
+	<script src="jquery.js" type="text/javascript"></script>
+	<script src="jquery.dimensions.js" type="text/javascript"></script>
+
+	<script src="ajaxslt/util.js" type="text/javascript"></script>
+	<script src="ajaxslt/xmltoken.js" type="text/javascript"></script>
+	<script src="ajaxslt/dom.js" type="text/javascript"></script>
+	<script src="ajaxslt/xpath.js" type="text/javascript"></script>
+	<script src="ajaxslt/xslt.js" type="text/javascript"></script>
+
+	<script type="text/javascript">
+	// <![CDATA[
+	$(function(){ // onload script via jquery
+
+		function el(elementId) {
+			return document.getElementById(elementId);
+			};
+
+		google.load('feeds', '1');
+		google.load('search', '1');
+		var search= null;
+		var linkview= el("linkview");
+		google.setOnLoadCallback(function(){
+			if(google.search){
+				search= new google.search.WebSearch();
+				search.setNoHtmlGeneration();
+				search.setResultSetSize(google.search.Search.LARGE_RESULTSET);
+				search.setSearchCompleteCallback(null,linkCallback);
+				}
+			});
+
+		var xmlser= new XMLSerializer();
+
+		function deJson(json) {
+			return eval(json);
+			};
+		function xsltProcessNative(input,stylesheet) {
+			var output = domCreateDocumentFragment(new XDocument);
+			xsltProcessContext(new ExprContext(input), stylesheet, output);
+			return output;
+			};
+		function dateSort(a,b) {
+			return (a.date<=b.date) ? 1 : -1;
+			};
+
+		function colorRandomGenerator() { 
+			var color="";
+			var primary= 3;
+			while(primary==3) primary= Math.floor(Math.random()*3);
+			var secondary= 3;
+			while(secondary==3 && secondary==primary) secondary= Math.floor(Math.random()*2);
+			for(var i= 0; i < 3; i++)
+			{
+				var min= 128;
+				var max= 192;
+				if(secondary==i) { min= 160; max= 240; }
+				if(primary==i) { min= 176; max= 255; }
+				color += (Math.floor(Math.random()*(max-min))+min).toString(16);
+			}
+			return color;
+			}
+		
+		var ajaxReady= true; // free for use
+		var ajaxRequestQueue= Array(); // queue for ajax calls
+		var ajaxCallback= null; // callback for current request
+		var ajaxCallbackParam= null; // state parameter for current request
+		var ajaxLastRetrieve= new Date(); // time of last ajax call
+		function ajaxQueue(url,callback,param) {
+			var args= arguments;
+			if(!ajaxReady) {
+				ajaxRequestQueue.push(args);
+				return;
+				}
+			ajaxReady= false;
+			while(new Date() - ajaxLastRetrieve < 1000) ;
+			ajaxLastRetrieve= new Date();
+			ajaxCallback= callback;
+			ajaxCallbackParam= param;
+			$.get(url,ajaxLoad)
+			};
+		function ajaxLoad(data) {
+			ajaxReady= true;
+			if(ajaxCallback && typeof(ajaxCallback)=="function") 
+				ajaxCallback(data,ajaxCallbackParam);
+			if(ajaxRequestQueue.length)
+				ajaxQueue.apply(null,ajaxRequestQueue.pop());
+			};
+
+		var rssReady= true;
+		var rssCallbackFunc;
+		var rssCallbackParam;
+		var rssRequestQueue= new Array();
+		function rssQueue(url,callback,param) {
+			var args= arguments;
+			if(!rssReady) {
+				rssRequestQueue.push(args);
+				return;
+			}
+			rssReady= false;
+			rssCallbackFunc= callback;
+			rssCallbackParam= param;
+
+			var feed = new google.feeds.Feed(url);
+			feed.setResultFormat(google.feeds.Feed.XML_FORMAT);
+			feed.setNumEntries(15); 
+			feed.includeHistoricalEntries(); //this feature is superb
+			feed.load(rssLoad);
+			};
+		function rssLoad(result) {
+			rssReady= true;
+			if(rssCallbackFunc && typeof(rssCallbackFunc)=="function")
+				rssCallbackFunc(result,rssCallbackParam);
+			if(rssRequestQueue.length)
+				rssQueue.apply(null,rssRequestQueue.pop());
+			};
+	
+		var friendsStore= new Object(); // object store for friends list
+		var friendsContainerXml= document.createElement("friendsListContainer"); 
+		var friendsXml = document.createElement("friendslist");
+		friendsContainerXml.appendChild(friendsXml);
+		var friendsList= el("friendsList"); // div for the friends list
+		var friendsTemplateString= el("friendsTemplate").innerHTML; // friend template
+		var friendsTemplate= xmlParse( el("friendsTemplate").innerHTML ); // ajaxslt friend template
+		function friendsCallback(friends,source) {
+			friends = deJson(friends);
+			for(var a in friends) {
+				var found= false;
+				var friend= friends[a];
+				for(var b in friendsStore) 
+					if(friend == b) found= true;
+				if (found) continue;
+				var store = new Object();
+				store.name= friend;
+				store.src= "http://del.icio.us/rss/"+friend;
+				store.source= source;
+				addFeed(store,false);
+				}
+			addFeed();
+			};
+
+		function addFeed(feed) {
+			if(feed) {
+				feed.color= colorRandomGenerator();
+				friendsStore[feed.name] = feed;
+
+				var xml= document.createElement("friend");
+				xml.setAttribute("source", feed.source);
+				xml.setAttribute("color", feed.color);
+				xml.appendChild(document.createTextNode(feed.name));
+				friendsXml.appendChild(xml);
+				feed.feedlisting= xml;
+
+				rssQueue(feed.src,rssCallback,feed);
+				};
+			if(arguments.length<2 || arguments[1]) {
+				friends= xmlParse(friendsContainerXml.innerHTML);
+				var xhtml= xsltProcess(friends,friendsTemplate);
+				friendsList.innerHTML= xhtml;
+				};
+			};
+
+		var rssTemplate= xmlParse(el("rssTemplate").innerHTML);
+		function rssCallback(rss,source) {
+			if(!rss.xmlDocument || !rss.xmlDocument.documentElement) return;
+			rss= xmlParse(xmlser.serializeToString(rss.xmlDocument.documentElement));
+			rss.firstChild.setAttribute("color",source.color);
+			var list= xsltProcessNative(rss,rssTemplate);
+
+			var indicies = xmlText(list.lastChild);
+			indicies= indicies.replace('<div xmlns="http://www.w3.org/1999/xhtml" id="itemIndex">','');
+			indicies= indicies.replace('</div>', '');
+			indicies= indicies.replace(/\n/g, '');
+			source.index= eval(indicies);
+			if(!source.entry) source.entry= new Array();
+			for(var i= 0; i < list.childNodes.length-1; i++){
+				source.entry[i]= xmlText(list.childNodes[i]);
+				}
+			feedsUpdated.push(source.name);
+			};
+	
+		var linkview= el("linkview");
+		var feedsUpdated= new Array();
+		var masterFeedIndex= new Array();
+		var masterFeedFragments= new Array();
+		var feedroll= el("feedroll");
+		var pageview= el("pageview");
+		var pageframe= el("pageframe");
+		var lastlink= "";
+		function tick(){
+			var hash= document.location.hash;
+			switch(hash.substring(1,5)) {
+				case "":
+					hash= null;
+					break;
+				case 'frie':
+					var friend= hash.substring(8);
+					ajaxQueue('/proxy/?proxy=del.icio.us/feeds/json/network/'+friend, friendsCallback, friend);
+					break;
+				case 'colo': 
+					var friend= friendsStore[hash.substring(7)];
+					if(!friend) break;
+					var color= colorRandomGenerator();
+					var rsearch= new RegExp(friend.color,"g");
+					if(friend.entry.length)
+						for(var i= 0; i < friend.entry.length; i++)
+							friend.entry[i] = friend.entry[i].replace(rsearch,color);
+					friend.feedlisting.setAttribute("color",color);
+					friend.color= color;
+					addFeed();
+					feedsUpdated.push(0);
+					break;
+				case 'clea': 
+					var friend= hash.substring(7);
+					if(!friendsStore[friend]) break;
+					for(var i= 0; i < masterFeedIndex.length; i++)
+						if(masterFeedIndex[i]["creator"]==friend) {
+							masterFeedIndex[i]= masterFeedIndex[masterFeedIndex.length-1];
+							masterFeedIndex.length= masterFeedIndex.length-1;
+							}
+					for(var i= 0; i < friendsXml.childNodes.length; i++)
+						if(friendsXml.childNodes[i].textContent==friend) friendsXml.removeChild(friendsXml.childNodes[i]);
+					delete friendsStore[friend];
+					addFeed();
+					feedsUpdated.push(0);
+					break;
+				case 'link':
+					var link= hash.substring(6);
+					if(lastlink!=link) {
+						lastlink= link;
+						search.execute("link:"+link);
+						try { pageframe.src= link; } catch (ex) {}
+						}
+					break;
+				case 'feed':
+					var feed= hash.substring(6);
+					var store= new Object();
+					store.name="tag:"+hash.substring(33);
+					store.src=feed;
+					store.source=hash.substring(33);
+					addFeed(store);
+					break;
+				};
+				if(hash) document.location.href="#";
+
+			if(feedsUpdated.length) {
+				for(var i in feedsUpdated) {
+					var friend= friendsStore[feedsUpdated[i]];
+					if(!friend) continue;
+					masterFeedIndex= masterFeedIndex.concat(friend.index);
+					if(masterFeedIndex.length) masterFeedIndex.sort(dateSort);
+					}
+				for(var i= 0; i < masterFeedIndex.length; i++) 
+					masterFeedFragments[i]= friendsStore[masterFeedIndex[i].creator].entry[masterFeedIndex[i].index];
+				feedroll.innerHTML= masterFeedFragments.join('');
+				feedsUpdated.length= 0;
+				}
+			};
+		window.setInterval(tick,1666);
+
+		function linkCallback(){
+			var xhtml= new Array();
+			var result;
+			for(var i= 0; i < search.results.length; i++) {
+				result= search.results[i];
+				xhtml.push('<p class="listing"><a target="pageframe" href="');
+				xhtml.push(result.unescapedUrl);
+				xhtml.push('">');
+				xhtml.push(result.title);
+				xhtml.push('</a></p><p class="listing small">');
+				xhtml.push(result.content.replace(/&[A-Za-wyz]+;/g,'*'));
+				xhtml.push('</p><br/>');
+				}
+			linkview.innerHTML= xhtml.join('');
+			}
+
+		var goButton= $("#goButton");
+		goButton.click(function(){ 
+			var store= new Object();
+			store.name= userInput.val();
+			store.src= "http://del.icio.us/rss/"+userInput.val();
+			store.source= userInput.val();
+			addFeed(store);
+			ajaxQueue('/proxy/?proxy=del.icio.us/feeds/json/network/'+userInput.val(), friendsCallback, userInput.val()); 
+			});
+
+		var sizerText= $("#sizerText");
+		var sizerTextW= $("#sizerTextW");
+		var sizeItWide= function() {
+			var self= $(this);
+			sizerTextW.text(self.val());
+			self.width(sizerTextW.width());
+			};
+		
+		var userInput= $("#userInput");
+		userInput.keyup(sizeItWide); // bind autosizer to user input text
+		sizeItWide.apply(userInput.get(0)); // autosize user input text
+	});
+	// ]]>
+	</script>
+</head>
+<body style="background-color: white;" >
+
+<xml id="friendsTemplate" style="display: none; visibility: hidden;"
+	xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<xsl:stylesheet>
+<xsl:template match='friend' >
+	<div>
+	<xsl:attribute name="id">friendsList<xsl:value-of select="."/></xsl:attribute>
+	<xsl:attribute name="style">background-color: #<xsl:value-of select="./@color"/>;</xsl:attribute>
+	<a class='friend'>
+		<xsl:value-of select="." />
+		<xsl:attribute name="title">add <xsl:value-of select="." />'s del.icio.us network</xsl:attribute>
+		<xsl:attribute name="href">#friend=<xsl:value-of select="." /></xsl:attribute>
+	</a> 
+	(<xsl:value-of select="./@source" />) 
+	<a title='re-colorize feed'>
+		.  
+		<xsl:attribute name="href">#color=<xsl:value-of select="." /></xsl:attribute>
+	</a> 
+	<a title='clear feed'>
+		X
+		<xsl:attribute name="href">#clear=<xsl:value-of select="." /></xsl:attribute>
+	</a>
+	</div>
+</xsl:template>
+<xsl:template match='/' name='root'><xsl:apply-templates select='friendslist/friend' /></xsl:template>
+</xsl:stylesheet>
+</xml>
+
+<xml id="rssTemplate" style="display:none; visibility: hidden;"
+	xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+<xsl:stylesheet>
+
+<xsl:template match="/">
+<xsl:apply-templates select="rdf:RDF/item" />
+<xsl:call-template name="itemIndex" />
+</xsl:template>
+
+<xsl:template name="itemIndex">
+<div id="itemIndex">
+[
+	<xsl:for-each select="rdf:RDF/item">
+	{  index: <xsl:value-of select="position()" />, creator: '<xsl:value-of select="dc:creator" />', date: '<xsl:value-of select="dc:date"/>' },
+	</xsl:for-each>
+]
+</div>
+</xsl:template>
+
+<xsl:template match="item">
+<div>
+	<xsl:attribute name="id"><xsl:value-of select="dc:creator"/><xsl:value-of select="position()"/></xsl:attribute>
+	<xsl:attribute name="style">background-color: #<xsl:value-of select="/rdf:RDF/@color" />;</xsl:attribute>
+	<p class="big listing">
+		<a>
+		<xsl:attribute name="href">#link=<xsl:value-of select="link"/></xsl:attribute>
+		<xsl:value-of select="title" />
+		</a>
+		<a class="smaller">
+		<xsl:attribute name="href"><xsl:value-of select="link"/></xsl:attribute>
+		[go]
+		</a>
+	</p>
+	<xsl:choose>
+		<xsl:when test="starts-with(description, '&lt;p&gt;')">
+			<p class="listing"><xsl:value-of select="substring-after(substring-before(description,'&lt;/p&gt;'), '&lt;p&gt;')" /></p>
+		</xsl:when>
+		<xsl:when test="starts-with(description, '&lt;span&gt;')"></xsl:when>
+		<xsl:when test="description">
+			<p class="listing"><xsl:value-of select="description" /></p>
+		</xsl:when>
+	</xsl:choose>
+	<p class="listing">
+		<xsl:if test="dc:creator">
+			<a>
+			<xsl:value-of select="dc:creator"/>
+			<xsl:attribute name="href"><xsl:value-of select="concat('#feed=http://del.icio.us/rss/', dc:creator)" /></xsl:attribute>
+			</a>
+		</xsl:if>
+		<xsl:if test="taxo:topics/rdf:Bag/rdf:li/@resource">
+			to 
+			<xsl:for-each select="taxo:topics/rdf:Bag/rdf:li/@resource"> 
+			<xsl:text>&#160;</xsl:text>
+			<a>
+			<xsl:choose>
+				<xsl:when test="contains(.,'http://del.icio.us')">
+					<xsl:value-of select="substring(.,24)" /> 
+					<xsl:attribute name="href"><xsl:value-of select="concat('#feed=http://del.icio.us/rss/tag/', substring(.,24))" /></xsl:attribute>
+				</xsl:when>
+				<xsl:otherwise>
+					<xsl:value-of select="." />
+					<xsl:attribute name="href"><xsl:value-of select="." /></xsl:attribute>
+				</xsl:otherwise>
+			</xsl:choose>
+			</a>
+			
+			</xsl:for-each>
+		</xsl:if>
+		<xsl:if test="dc:date">
+			on
+			<xsl:value-of select="dc:date" />
+		</xsl:if>
+	</p><br/>
+</div>
+</xsl:template>
+</xsl:stylesheet>
+</xml>
+
+<!-- paragraphs for measuring the size of text" -->
+<p id="sizerText" style="position: absolute; float:left; color: white; z-index: -1;">Myren</p>
+<p id="sizerTextW" class="wide big" style="position: absolute; font-size: 1.58em; float:left; color: white; z-index: -1;">Myren</p>
+
+<div class="structural" style="width: 778px;">
+<p class="wide big">
+feast upon ::: del.icio.us/
+<input id="userInput" title="enter a del.icio.us user" type="text" value="Myren" class="wide big"></input> 
+::: 
+<a id="goButton" title="begin feasting upon users network" href="#">GO</a><br/></p>
+<p>reverse-linkage explorer</p>
+</div>
+
+<div class="structural" style="clear: left; height: 560px; width: 192px; overflow-x: visible;">
+viewing del.icio.us of:
+<p id="friendsList"></p>
+</div>
+
+<div id="feedroll" class="structural" style="width: 520px; height: 560px; "></div>
+
+<div id="pageview" class="structural" style="width: 420px; height: 300px; clear:both;">
+<iframe id="pageframe" style="width:415px; height:290px;" name="pageframe" />
+</div>
+<div id="linkview" class="structural" style="width: 292px; height: 300px;">Loading...</div>
+
+</body>
+</html>
